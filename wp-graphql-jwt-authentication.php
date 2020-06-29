@@ -7,7 +7,7 @@
  * Author URI: https://www.wpgraphql.com
  * Text Domain: wp-graphql-jwt-authentication-jwt-authentication
  * Domain Path: /languages
- * Version: 0.3.3
+ * Version: 0.4.1
  * Requires at least: 4.7.0
  * Tested up to: 4.8.3
  * Requires PHP: 5.5
@@ -35,8 +35,10 @@ if ( file_exists( __DIR__ . '/c3.php' ) ) {
 
 if ( ! class_exists( '\WPGraphQL\JWT_Authentication' ) ) :
 
+	/**
+	 * Class - JWT_Authentication
+	 */
 	final class JWT_Authentication {
-
 		/**
 		 * Stores the instance of the JWT_Authentication class
 		 *
@@ -54,7 +56,6 @@ if ( ! class_exists( '\WPGraphQL\JWT_Authentication' ) ) :
 		 * @access public
 		 */
 		public static function instance() {
-
 			if ( ! isset( self::$instance ) && ! ( self::$instance instanceof JWT_Authentication ) ) {
 				self::$instance = new JWT_Authentication;
 				self::$instance->setup_constants();
@@ -86,10 +87,8 @@ if ( ! class_exists( '\WPGraphQL\JWT_Authentication' ) ) :
 		 * @return void
 		 */
 		public function __clone() {
-
 			// Cloning instances of the class is forbidden.
 			_doing_it_wrong( __FUNCTION__, esc_html__( 'The Init_JWT_Authentication class should not be cloned.', 'wp-graphql-jwt-authentication' ), '0.0.1' );
-
 		}
 
 		/**
@@ -100,10 +99,8 @@ if ( ! class_exists( '\WPGraphQL\JWT_Authentication' ) ) :
 		 * @return void
 		 */
 		public function __wakeup() {
-
 			// De-serializing instances of the class is forbidden.
 			_doing_it_wrong( __FUNCTION__, esc_html__( 'De-serializing instances of the WPGraphQL class is not allowed', 'wp-graphql-jwt-authentication' ), '0.0.1' );
-
 		}
 
 		/**
@@ -114,10 +111,9 @@ if ( ! class_exists( '\WPGraphQL\JWT_Authentication' ) ) :
 		 * @return void
 		 */
 		private function setup_constants() {
-
 			// Plugin version.
 			if ( ! defined( 'WPGRAPHQL_JWT_AUTHENTICATION_VERSION' ) ) {
-				define( 'WPGRAPHQL_JWT_AUTHENTICATION_VERSION', '0.3.3' );
+				define( 'WPGRAPHQL_JWT_AUTHENTICATION_VERSION', '0.4.1' );
 			}
 
 			// Plugin Folder Path.
@@ -135,11 +131,10 @@ if ( ! class_exists( '\WPGraphQL\JWT_Authentication' ) ) :
 				define( 'WPGRAPHQL_JWT_AUTHENTICATION_PLUGIN_FILE', __FILE__ );
 			}
 
-			// Whether to autoload the files or not
+			// Whether to autoload the files or not.
 			if ( ! defined( 'WPGRAPHQL_JWT_AUTHENTICATION_AUTOLOAD' ) ) {
 				define( 'WPGRAPHQL_JWT_AUTHENTICATION_AUTOLOAD', true );
 			}
-
 		}
 
 		/**
@@ -151,9 +146,8 @@ if ( ! class_exists( '\WPGraphQL\JWT_Authentication' ) ) :
 		 * @return void
 		 */
 		private function includes() {
-
-			// Autoload Required Classes
-			if ( defined( 'WPGRAPHQL_JWT_AUTHENTICATION_AUTOLOAD' ) && true == WPGRAPHQL_JWT_AUTHENTICATION_AUTOLOAD ) {
+			// Autoload Required Classes.
+			if ( defined( 'WPGRAPHQL_JWT_AUTHENTICATION_AUTOLOAD' ) && true === WPGRAPHQL_JWT_AUTHENTICATION_AUTOLOAD ) {
 				require_once( WPGRAPHQL_JWT_AUTHENTICATION_PLUGIN_DIR . 'vendor/autoload.php' );
 			}
 		}
@@ -162,43 +156,64 @@ if ( ! class_exists( '\WPGraphQL\JWT_Authentication' ) ) :
 		 * Initialize the plugin
 		 */
 		private static function init() {
-
-			/**
-			 * Initialize the GraphQL fields for managing tokens
-			 */
+			// Initialize the GraphQL fields for managing tokens.
 			ManageTokens::init();
 
-			/**
-			 * Filter how WordPress determines the current user
-			 */
-			add_filter( 'determine_current_user', [
-				'\WPGraphQL\JWT_Authentication\Auth',
-				'filter_determine_current_user'
-			], 99, 1 );
+
+			// Filter how WordPress determines the current user.
+			add_filter(
+				'determine_current_user',
+				[ '\WPGraphQL\JWT_Authentication\Auth', 'filter_determine_current_user' ],
+				99
+			);
+
+			// Register the "login" mutation to the Schema.
+			add_action(
+				'graphql_register_types',
+				[ '\WPGraphQL\JWT_Authentication\Login', 'register_mutation' ],
+				10
+			);
+
+			// Register the "refreshToken" mutation to the Schema.
+			add_filter(
+				'graphql_register_types',
+				[ '\WPGraphQL\JWT_Authentication\RefreshToken', 'register_mutation' ],
+				10
+			);
+
 
 			/**
-			 * Register the login mutation to the Schema
+			 * When the GraphQL Request is initiated, validate the token.
+			 *
+			 * If the Auth Token is not valid, prevent execution of resolvers. This will also set the
+			 * response status to 403.
 			 */
-			add_action( 'graphql_register_types', [
-				'\WPGraphQL\JWT_Authentication\Login',
-				'register_mutation'
-			], 10 );
+			add_action( 'init_graphql_request', function() {
 
-			add_filter( 'graphql_rootMutation_fields', [
-				'\WPGraphQL\JWT_Authentication\RefreshToken',
-				'root_mutation_fields'
-			], 10, 1 );
+				$jwt_secret = Auth::get_secret_key();
+				if ( empty( $jwt_secret ) || 'graphql-jwt-auth' === $jwt_secret ) {
+					throw new \Exception( __( 'You must define the GraphQL JWT Auth secret to use the WPGraphQL JWT Authentication plugin.', 'graphql-jwt-auth' ) );
+				} else {
+					$token = Auth::validate_token();
+					if ( is_wp_error( $token ) ) {
+						add_action( 'graphql_before_resolve_field', function() use ( $token ) {
+							throw new \Exception( $token->get_error_code() . ' | ' . $token->get_error_message() );
+						}, 1 );
+					}
+				}
 
 
+			} );
 
 		}
-
 	}
 
 endif;
 
+/**
+ * Start JWT_Authentication.
+ */
 function init() {
 	return JWT_Authentication::instance();
 }
-
 add_action( 'plugins_loaded', '\WPGraphQL\JWT_Authentication\init', 1 );
